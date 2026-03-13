@@ -1,0 +1,134 @@
+{
+  "flow_id": "langroot.publisher_onboarding",
+  "version": "1.0",
+  "description": "Establishes a trust relationship between a new Publisher actor and a Langroot Federation Node. Walks the publisher from unknown identity through DID verification, manual approval, and resource provisioning before granting active publishing capabilities.",
+  "states": [
+    {
+      "state_id": "unknown",
+      "trust_floor": 0.0,
+      "ttl_seconds": 86400,
+      "capabilities": [],
+      "requires_cba_binding": false,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "announced",
+      "trust_floor": 0.1,
+      "ttl_seconds": 86400,
+      "capabilities": ["read:public"],
+      "requires_cba_binding": false,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "verified",
+      "trust_floor": 0.4,
+      "ttl_seconds": 604800,
+      "capabilities": ["read:public", "write:draft"],
+      "requires_cba_binding": true,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "provisioned",
+      "trust_floor": 0.6,
+      "ttl_seconds": 2592000,
+      "capabilities": ["read:public", "write:draft", "write:submit"],
+      "requires_cba_binding": true,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "active",
+      "trust_floor": 0.75,
+      "ttl_seconds": 0,
+      "capabilities": ["read:public", "write:draft", "write:submit", "publish"],
+      "requires_cba_binding": true,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "suspended",
+      "trust_floor": 0.0,
+      "ttl_seconds": 0,
+      "capabilities": [],
+      "requires_cba_binding": false,
+      "is_terminal": true,
+      "is_suspended": true
+    }
+  ],
+  "transitions": [
+    {
+      "from_state": "unknown",
+      "to_state": "announced",
+      "trigger": "publisher_did_submitted",
+      "gates": [
+        { "type": "DID_PRESENT", "param": "did:web" }
+      ],
+      "side_effects": [
+        "emit:trust_event:publisher_announced"
+      ]
+    },
+    {
+      "from_state": "announced",
+      "to_state": "verified",
+      "trigger": "did_verification_passed",
+      "gates": [
+        { "type": "PQC_SIGNATURE", "param": "stub:dilithium2" },
+        { "type": "SCORE_FLOOR", "param": "0.4" }
+      ],
+      "side_effects": [
+        "emit:trust_event:publisher_did_verified"
+      ]
+    },
+    {
+      "from_state": "verified",
+      "to_state": "provisioned",
+      "trigger": "manual_approval_granted",
+      "gates": [
+        { "type": "MANUAL_APPROVAL", "param": "operator_review" },
+        { "type": "CBA_CONTEXT", "param": "require_binding" }
+      ],
+      "side_effects": [
+        "emit:trust_event:publisher_provisioned",
+        "provision:publisher_resources"
+      ]
+    },
+    {
+      "from_state": "provisioned",
+      "to_state": "active",
+      "trigger": "first_content_submitted",
+      "gates": [
+        { "type": "SCORE_FLOOR", "param": "0.75" },
+        { "type": "CBA_CONTEXT", "param": "require_binding" }
+      ],
+      "side_effects": [
+        "emit:trust_event:publisher_activated"
+      ]
+    },
+    {
+      "from_state": "active",
+      "to_state": "suspended",
+      "trigger": "policy_violation_detected",
+      "gates": [
+        { "type": "SCORE_CEILING", "param": "0.2" }
+      ],
+      "side_effects": [
+        "emit:trust_event:publisher_suspended",
+        "revoke:publisher_capabilities"
+      ]
+    },
+    {
+      "from_state": "verified",
+      "to_state": "suspended",
+      "trigger": "manual_denial_issued",
+      "gates": [
+        { "type": "MANUAL_APPROVAL", "param": "operator_deny" }
+      ],
+      "side_effects": [
+        "emit:trust_event:publisher_suspended"
+      ]
+    }
+  ]
+}

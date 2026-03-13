@@ -1,0 +1,156 @@
+{
+  "flow_id": "langroot.federation_handshake",
+  "version": "1.0",
+  "description": "Governs the handshake between a Langroot control-plane node and a remote publisher kernel. Mirrors the AXIOM federation_handshake_v1 pattern while adding Langroot-specific side effects and PQC gate stubs for post-quantum key exchange.",
+  "states": [
+    {
+      "state_id": "init",
+      "trust_floor": 0.0,
+      "ttl_seconds": 300,
+      "capabilities": [],
+      "requires_cba_binding": false,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "hello_sent",
+      "trust_floor": 0.2,
+      "ttl_seconds": 120,
+      "capabilities": ["read:remote_manifest"],
+      "requires_cba_binding": false,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "keys_exchanged",
+      "trust_floor": 0.5,
+      "ttl_seconds": 120,
+      "capabilities": ["read:remote_manifest", "write:encrypted_channel"],
+      "requires_cba_binding": false,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "capabilities_negotiated",
+      "trust_floor": 0.6,
+      "ttl_seconds": 86400,
+      "capabilities": ["read:remote_manifest", "write:encrypted_channel", "sync:feeds"],
+      "requires_cba_binding": true,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "established",
+      "trust_floor": 0.7,
+      "ttl_seconds": 0,
+      "capabilities": ["read:remote_manifest", "write:encrypted_channel", "sync:feeds", "federate:publish"],
+      "requires_cba_binding": true,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "failed",
+      "trust_floor": 0.0,
+      "ttl_seconds": 0,
+      "capabilities": [],
+      "requires_cba_binding": false,
+      "is_terminal": true,
+      "is_suspended": false
+    },
+    {
+      "state_id": "revoked",
+      "trust_floor": 0.0,
+      "ttl_seconds": 0,
+      "capabilities": [],
+      "requires_cba_binding": false,
+      "is_terminal": true,
+      "is_suspended": true
+    }
+  ],
+  "transitions": [
+    {
+      "from_state": "init",
+      "to_state": "hello_sent",
+      "trigger": "federation_hello_emitted",
+      "gates": [
+        { "type": "DID_PRESENT", "param": "did:web" }
+      ],
+      "side_effects": [
+        "emit:federation_sync_started",
+        "emit:trust_event:federation_hello_sent"
+      ]
+    },
+    {
+      "from_state": "hello_sent",
+      "to_state": "keys_exchanged",
+      "trigger": "remote_hello_ack_received",
+      "gates": [
+        { "type": "PQC_SIGNATURE", "param": "stub:dilithium2" },
+        { "type": "SCORE_FLOOR", "param": "0.5" },
+        { "type": "TTL", "param": "120" }
+      ],
+      "side_effects": [
+        "emit:trust_event:federation_keys_exchanged"
+      ]
+    },
+    {
+      "from_state": "hello_sent",
+      "to_state": "failed",
+      "trigger": "remote_hello_timeout",
+      "gates": [
+        { "type": "TTL_EXCEEDED", "param": "120" }
+      ],
+      "side_effects": [
+        "emit:trust_event:federation_handshake_failed"
+      ]
+    },
+    {
+      "from_state": "keys_exchanged",
+      "to_state": "capabilities_negotiated",
+      "trigger": "capability_exchange_completed",
+      "gates": [
+        { "type": "SCORE_FLOOR", "param": "0.6" },
+        { "type": "CBA_CONTEXT", "param": "require_binding" },
+        { "type": "TTL", "param": "120" }
+      ],
+      "side_effects": [
+        "emit:trust_event:federation_capabilities_negotiated",
+        "emit:federation_sync_started"
+      ]
+    },
+    {
+      "from_state": "keys_exchanged",
+      "to_state": "failed",
+      "trigger": "capability_mismatch_detected",
+      "gates": [],
+      "side_effects": [
+        "emit:trust_event:federation_handshake_failed"
+      ]
+    },
+    {
+      "from_state": "capabilities_negotiated",
+      "to_state": "established",
+      "trigger": "handshake_confirmed",
+      "gates": [
+        { "type": "SCORE_FLOOR", "param": "0.7" },
+        { "type": "NONCE", "param": "single_use" }
+      ],
+      "side_effects": [
+        "emit:trust_event:federation_established",
+        "emit:federation_sync_started"
+      ]
+    },
+    {
+      "from_state": "established",
+      "to_state": "revoked",
+      "trigger": "federation_trust_revoked",
+      "gates": [
+        { "type": "SCORE_CEILING", "param": "0.3" }
+      ],
+      "side_effects": [
+        "emit:trust_event:federation_revoked",
+        "revoke:federation_capabilities"
+      ]
+    }
+  ]
+}

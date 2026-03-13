@@ -1,0 +1,162 @@
+{
+  "flow_id": "langroot.creator_patch",
+  "version": "1.0",
+  "description": "A creator submits a content patch to a publisher. Covers the full lifecycle: draft authoring, submission, publisher queue, application, and completion — with rejection and suspension exit paths. All transitions are gated on trust score, context binding, nonce uniqueness, and TTL.",
+  "states": [
+    {
+      "state_id": "draft",
+      "trust_floor": 0.0,
+      "ttl_seconds": 604800,
+      "capabilities": ["write:local_draft"],
+      "requires_cba_binding": false,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "submitted",
+      "trust_floor": 0.3,
+      "ttl_seconds": 86400,
+      "capabilities": ["read:submission_status"],
+      "requires_cba_binding": true,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "queued",
+      "trust_floor": 0.4,
+      "ttl_seconds": 172800,
+      "capabilities": ["read:submission_status"],
+      "requires_cba_binding": true,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "applied",
+      "trust_floor": 0.5,
+      "ttl_seconds": 3600,
+      "capabilities": ["read:submission_status", "read:applied_diff"],
+      "requires_cba_binding": true,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "completed",
+      "trust_floor": 0.5,
+      "ttl_seconds": 0,
+      "capabilities": ["read:submission_status", "read:applied_diff"],
+      "requires_cba_binding": false,
+      "is_terminal": true,
+      "is_suspended": false
+    },
+    {
+      "state_id": "rejected",
+      "trust_floor": 0.0,
+      "ttl_seconds": 0,
+      "capabilities": [],
+      "requires_cba_binding": false,
+      "is_terminal": true,
+      "is_suspended": false
+    },
+    {
+      "state_id": "suspended",
+      "trust_floor": 0.0,
+      "ttl_seconds": 0,
+      "capabilities": [],
+      "requires_cba_binding": false,
+      "is_terminal": true,
+      "is_suspended": true
+    }
+  ],
+  "transitions": [
+    {
+      "from_state": "draft",
+      "to_state": "submitted",
+      "trigger": "creator_submits_patch",
+      "gates": [
+        { "type": "SCORE_FLOOR", "param": "0.3" },
+        { "type": "CBA_CONTEXT", "param": "require_binding" },
+        { "type": "NONCE", "param": "single_use" }
+      ],
+      "side_effects": [
+        "emit:trust_event:creator_patch_submitted"
+      ]
+    },
+    {
+      "from_state": "submitted",
+      "to_state": "queued",
+      "trigger": "publisher_preflight_passed",
+      "gates": [
+        { "type": "SCORE_FLOOR", "param": "0.4" },
+        { "type": "TTL", "param": "86400" }
+      ],
+      "side_effects": [
+        "emit:trust_event:creator_patch_queued"
+      ]
+    },
+    {
+      "from_state": "submitted",
+      "to_state": "rejected",
+      "trigger": "publisher_preflight_failed",
+      "gates": [
+        { "type": "SCORE_CEILING", "param": "0.4" }
+      ],
+      "side_effects": [
+        "emit:trust_event:creator_patch_rejected"
+      ]
+    },
+    {
+      "from_state": "queued",
+      "to_state": "applied",
+      "trigger": "publisher_applies_patch",
+      "gates": [
+        { "type": "SCORE_FLOOR", "param": "0.5" },
+        { "type": "CBA_CONTEXT", "param": "require_binding" },
+        { "type": "TTL", "param": "172800" }
+      ],
+      "side_effects": [
+        "emit:trust_event:creator_patch_applied"
+      ]
+    },
+    {
+      "from_state": "queued",
+      "to_state": "rejected",
+      "trigger": "publisher_denies_patch",
+      "gates": [],
+      "side_effects": [
+        "emit:trust_event:creator_patch_rejected"
+      ]
+    },
+    {
+      "from_state": "applied",
+      "to_state": "completed",
+      "trigger": "patch_confirmed_live",
+      "gates": [
+        { "type": "TTL", "param": "3600" }
+      ],
+      "side_effects": [
+        "emit:trust_event:creator_patch_accepted"
+      ]
+    },
+    {
+      "from_state": "applied",
+      "to_state": "rejected",
+      "trigger": "patch_rollback_triggered",
+      "gates": [],
+      "side_effects": [
+        "emit:trust_event:creator_patch_rejected"
+      ]
+    },
+    {
+      "from_state": "queued",
+      "to_state": "suspended",
+      "trigger": "abuse_signal_detected",
+      "gates": [
+        { "type": "SCORE_CEILING", "param": "0.2" }
+      ],
+      "side_effects": [
+        "emit:trust_event:creator_patch_rejected",
+        "emit:trust_event:creator_suspended"
+      ]
+    }
+  ]
+}

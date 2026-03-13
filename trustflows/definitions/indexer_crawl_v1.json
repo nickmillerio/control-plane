@@ -1,0 +1,186 @@
+{
+  "flow_id": "langroot.indexer_crawl",
+  "version": "1.0",
+  "description": "Governs the Langroot indexer crawling a publisher node using batch/outbox semantics aligned with the AXIOM crawler_visit_v1 pattern. The indexer is treated as a trusted actor passing ReferrerContext; side effects emit Langroot-specific intent events and update the outbox delivery state.",
+  "states": [
+    {
+      "state_id": "idle",
+      "trust_floor": 0.0,
+      "ttl_seconds": 0,
+      "capabilities": [],
+      "requires_cba_binding": false,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "scheduled",
+      "trust_floor": 0.3,
+      "ttl_seconds": 3600,
+      "capabilities": ["read:crawl_schedule"],
+      "requires_cba_binding": false,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "preflight",
+      "trust_floor": 0.4,
+      "ttl_seconds": 300,
+      "capabilities": ["read:crawl_schedule", "read:robots_policy"],
+      "requires_cba_binding": true,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "batch_open",
+      "trust_floor": 0.5,
+      "ttl_seconds": 1800,
+      "capabilities": ["read:public_content", "write:outbox_batch"],
+      "requires_cba_binding": true,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "outbox_pickup",
+      "trust_floor": 0.5,
+      "ttl_seconds": 900,
+      "capabilities": ["read:outbox_batch", "write:index_queue"],
+      "requires_cba_binding": true,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "rerouting",
+      "trust_floor": 0.4,
+      "ttl_seconds": 600,
+      "capabilities": ["read:crawl_schedule"],
+      "requires_cba_binding": false,
+      "is_terminal": false,
+      "is_suspended": false
+    },
+    {
+      "state_id": "completed",
+      "trust_floor": 0.5,
+      "ttl_seconds": 0,
+      "capabilities": [],
+      "requires_cba_binding": false,
+      "is_terminal": true,
+      "is_suspended": false
+    },
+    {
+      "state_id": "blocked",
+      "trust_floor": 0.0,
+      "ttl_seconds": 0,
+      "capabilities": [],
+      "requires_cba_binding": false,
+      "is_terminal": true,
+      "is_suspended": true
+    }
+  ],
+  "transitions": [
+    {
+      "from_state": "idle",
+      "to_state": "scheduled",
+      "trigger": "crawl_scheduled",
+      "gates": [
+        { "type": "SCORE_FLOOR", "param": "0.3" }
+      ],
+      "side_effects": [
+        "emit:trust_event:indexer_crawl_scheduled",
+        "emit:langroot_intent:index"
+      ]
+    },
+    {
+      "from_state": "scheduled",
+      "to_state": "preflight",
+      "trigger": "crawl_preflight_initiated",
+      "gates": [
+        { "type": "SCORE_FLOOR", "param": "0.4" },
+        { "type": "CBA_CONTEXT", "param": "require_binding" },
+        { "type": "NONCE", "param": "single_use" }
+      ],
+      "side_effects": [
+        "emit:trust_event:indexer_preflight_started"
+      ]
+    },
+    {
+      "from_state": "preflight",
+      "to_state": "batch_open",
+      "trigger": "preflight_passed",
+      "gates": [
+        { "type": "SCORE_FLOOR", "param": "0.5" },
+        { "type": "TTL", "param": "300" }
+      ],
+      "side_effects": [
+        "emit:trust_event:indexer_batch_opened",
+        "emit:langroot_intent:batch_collect"
+      ]
+    },
+    {
+      "from_state": "preflight",
+      "to_state": "blocked",
+      "trigger": "preflight_failed",
+      "gates": [
+        { "type": "SCORE_CEILING", "param": "0.4" }
+      ],
+      "side_effects": [
+        "emit:trust_event:indexer_blocked",
+        "emit:langroot_intent:crawl_denied"
+      ]
+    },
+    {
+      "from_state": "batch_open",
+      "to_state": "outbox_pickup",
+      "trigger": "batch_ready_for_pickup",
+      "gates": [
+        { "type": "TTL", "param": "1800" }
+      ],
+      "side_effects": [
+        "emit:trust_event:indexer_outbox_pickup",
+        "emit:langroot_intent:outbox_deliver"
+      ]
+    },
+    {
+      "from_state": "batch_open",
+      "to_state": "rerouting",
+      "trigger": "publisher_reroute_requested",
+      "gates": [],
+      "side_effects": [
+        "emit:trust_event:indexer_rerouting"
+      ]
+    },
+    {
+      "from_state": "rerouting",
+      "to_state": "scheduled",
+      "trigger": "reroute_resolved",
+      "gates": [
+        { "type": "SCORE_FLOOR", "param": "0.3" }
+      ],
+      "side_effects": [
+        "emit:trust_event:indexer_crawl_scheduled"
+      ]
+    },
+    {
+      "from_state": "outbox_pickup",
+      "to_state": "completed",
+      "trigger": "batch_delivered",
+      "gates": [
+        { "type": "TTL", "param": "900" }
+      ],
+      "side_effects": [
+        "emit:trust_event:indexer_crawl_completed",
+        "emit:langroot_intent:index_delivered"
+      ]
+    },
+    {
+      "from_state": "outbox_pickup",
+      "to_state": "rerouting",
+      "trigger": "pickup_timeout",
+      "gates": [
+        { "type": "TTL_EXCEEDED", "param": "900" }
+      ],
+      "side_effects": [
+        "emit:trust_event:indexer_pickup_timeout"
+      ]
+    }
+  ]
+}
